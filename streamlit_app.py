@@ -136,20 +136,21 @@ def get_ipc_from_datos_gob_ar():
         
         # MEJORA: Agregar datos faltantes de 2025 si la API no los tiene
         ultimo_dato = df['fecha'].max()
-        fecha_abril_2025 = pd.Timestamp('2025-04-01')
+        fecha_junio_2025 = pd.Timestamp('2025-06-01')
         
-        if ultimo_dato < fecha_abril_2025:
+        if ultimo_dato < fecha_junio_2025:
             # Obtener el último IPC para calcular los nuevos valores
             ultimo_ipc = df['ipc'].iloc[-1]
             
-            # Datos manuales de inflación mensual 2025 (fuente: INDEC)
-            # Se actualizan con cada nuevo dato oficial
+            # Datos oficiales de inflación mensual 2025 (fuente: INDEC)
+            # Actualizados con datos confirmados hasta junio 2025
             datos_2025 = [
                 ('2025-01-01', 2.2),  # Enero 2025: 2.2%
                 ('2025-02-01', 2.4),  # Febrero 2025: 2.4%
                 ('2025-03-01', 3.7),  # Marzo 2025: 3.7%
                 ('2025-04-01', 2.8),  # Abril 2025: 2.8%
                 ('2025-05-01', 1.5),  # Mayo 2025: 1.5%
+                ('2025-06-01', 1.6),  # Junio 2025: 1.6% (OFICIAL)
             ]
             
             # Calcular IPC acumulado para cada mes
@@ -164,7 +165,7 @@ def get_ipc_from_datos_gob_ar():
                     })
                     df = pd.concat([df, nuevo_dato], ignore_index=True)
             
-            st.info("✅ Datos de IPC complementados con información oficial del INDEC hasta mayo 2025")
+            st.info("✅ Datos de IPC actualizados con información oficial del INDEC hasta junio 2025 (1,6%)")
         
         return df
 
