@@ -14,78 +14,75 @@ st.set_page_config(
 # --- TÍTULO Y DESCRIPCIÓN ---
 st.title("📈 Dólar MEP Histórico a Precios de Hoy")
 st.markdown("""
-Esta aplicación visualiza la serie histórica del **Dólar MEP** ajustada por la inflación de Argentina (IPC Nacional)
+Esta aplicación visualiza la serie histórica del **Dólar MEP (implícito)** ajustada por la inflación de Argentina (IPC Nacional)
 para reflejar su valor en pesos de hoy. Esto permite comparar el poder de compra real del dólar a lo largo del tiempo.
-El círculo rojo destaca el comportamiento del precio desde la flexibilización cambiaria de mediados de abril de 2024.
+El área destacada en rojo muestra el comportamiento del precio desde mediados de abril de 2024.
 """)
 
 # --- FUNCIONES DE OBTENCIÓN DE DATOS (CON CACHÉ) ---
 
-@st.cache_data(ttl=3600) # Cachea los datos por 1 hora
-def get_historical_mep():
-    """Obtiene el historial del Dólar MEP desde una API pública."""
-    try:
-        response = requests.get("https://dolarapi.com/v1/dolares/bolsa", timeout=10)
-        response.raise_for_status() # Lanza un error si la petición falla
-        data = response.json()
-        df = pd.DataFrame(data)
-        df = df[['fecha', 'venta']]
-        df.columns = ['fecha', 'mep_nominal']
-        df['fecha'] = pd.to_datetime(df['fecha'])
-        return df.sort_values('fecha')
-    except requests.RequestException as e:
-        st.error(f"Error al obtener datos del Dólar MEP: {e}")
-        return None
+# Token público y headers para la API del BCRA
+BCRA_API_TOKEN = "BEARER eyJhbGciOiJIUzUxMiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3NTI1MjQ5MDksInR5cGUiOiJleHRlcm5hbCIsInVzZXIiOiJqdWFuLmFtYWRvQGZpbml0ZWNoLmNvbS5hciJ9.7M0mS_kkONYrEp6Wpve0Y1c2-y1p2i-T9o_N2i_j2kzlq2iOa-Yd9iALV5IqLd_IpoCM_2Wv_z3e2hh-3Q7PXA"
+BCRA_HEADERS = {"Authorization": BCRA_API_TOKEN}
 
-@st.cache_data(ttl=86400) # Cachea el IPC por 24 horas (cambia mensualmente)
-def get_historical_ipc():
-    """Obtiene el IPC Nacional GBA (base Dic 2016) desde la API del BCRA."""
-    # El token de la API del BCRA es público
-    token = "BEARER eyJhbGciOiJIUzUxMiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3NTI1MjQ5MDksInR5cGUiOiJleHRlcm5hbCIsInVzZXIiOiJqdWFuLmFtYWRvQGZpbml0ZWNoLmNvbS5hciJ9.7M0mS_kkONYrEp6Wpve0Y1c2-y1p2i-T9o_N2i_j2kzlq2iOa-Yd9iALV5IqLd_IpoCM_2Wv_z3e2hh-3Q7PXA"
-    headers = {"Authorization": token}
-    url = "https://api.bcra.gob.ar/estadisticas/v1/principalesvariables"
+@st.cache_data(ttl=3600) # Cachea los datos por 1 hora
+def get_bcra_series(variable_id, column_name):
+    """
+    Función genérica para obtener una serie de tiempo de la API del BCRA.
     
+    Args:
+        variable_id (int): El ID de la variable a consultar.
+        column_name (str): El nombre a asignar a la columna de valor.
+
+    Returns:
+        pd.DataFrame: Un DataFrame con 'fecha' y la columna de valor especificada.
+    """
+    url = "https://api.bcra.gob.ar/estadisticas/v1/principalesvariables"
     try:
-        response = requests.get(url, headers=headers, timeout=15)
+        response = requests.get(url, headers=BCRA_HEADERS, timeout=20)
         response.raise_for_status()
-        data = response.json()['results']
-        # ID 26 corresponde al IPC Nacional GBA, Nivel General, base Dic 2016
-        ipc_data = next((item for item in data if item["idVariable"] == 26), None)
-        if ipc_data:
-            df = pd.DataFrame(ipc_data['principalesVariables'])
+        all_data = response.json()['results']
+        
+        series_data = next((item for item in all_data if item["idVariable"] == variable_id), None)
+        
+        if series_data and series_data.get('principalesVariables'):
+            df = pd.DataFrame(series_data['principalesVariables'])
             df = df[['fecha', 'valor']]
-            df.columns = ['fecha', 'ipc']
+            df.columns = ['fecha', column_name]
             df['fecha'] = pd.to_datetime(df['fecha'], format='%Y-%m-%d')
-            # El IPC se publica a mes vencido, lo convertimos al primer día del mes para el cruce
-            df['fecha'] = df['fecha'].dt.to_period('M').dt.to_timestamp()
-            # Aseguramos que el valor del IPC es numérico
-            df['ipc'] = pd.to_numeric(df['ipc'])
+            df[column_name] = pd.to_numeric(df[column_name].astype(str).str.replace(',', '.'))
+            df = df[df[column_name] > 0].dropna() # Filtrar valores nulos o incorrectos
             return df.sort_values('fecha')
         else:
-            st.error("No se encontró la variable IPC (ID 26) en la respuesta del BCRA.")
+            st.error(f"No se encontraron datos para la variable con ID {variable_id} en la respuesta del BCRA.")
             return None
             
     except requests.RequestException as e:
-        st.error(f"Error al obtener datos del IPC desde el BCRA: {e}")
+        st.error(f"Error al conectar con la API del BCRA: {e}")
         return None
     except (KeyError, IndexError):
-        st.error("La estructura de datos del BCRA ha cambiado. No se pudo procesar el IPC.")
+        st.error("La estructura de datos del BCRA parece haber cambiado. No se pudo procesar la solicitud.")
         return None
 
 # --- LÓGICA PRINCIPAL DE LA APLICACIÓN ---
-with st.spinner("Cargando y procesando datos históricos..."):
-    df_mep = get_historical_mep()
-    df_ipc = get_historical_ipc()
+with st.spinner("Cargando y procesando datos históricos desde el BCRA..."):
+    # ID 296: Tipo de cambio implícito en bonos soberanos (diaria) -> Proxy MEP
+    # ID 26: IPC Nacional GBA, Nivel General, base Dic 2016
+    df_mep = get_bcra_series(variable_id=296, column_name='mep_nominal')
+    df_ipc = get_bcra_series(variable_id=26, column_name='ipc')
+    
+    # El IPC se publica mensualmente, lo preparamos para el cruce
+    if df_ipc is not None:
+        df_ipc['fecha'] = df_ipc['fecha'].dt.to_period('M').dt.to_timestamp()
+
 
     if df_mep is not None and df_ipc is not None and not df_mep.empty and not df_ipc.empty:
         # 1. Unir los dos DataFrames.
-        # `merge_asof` es ideal para esto: para cada día en `df_mep`,
-        # busca el último valor de IPC disponible en `df_ipc`.
         df_merged = pd.merge_asof(
-            df_mep.sort_values('fecha'),
-            df_ipc.sort_values('fecha'),
+            df_mep,
+            df_ipc,
             on='fecha',
-            direction='backward' # Usa el último IPC conocido para una fecha dada
+            direction='backward'
         )
         df_merged.dropna(inplace=True)
 
@@ -104,35 +101,30 @@ with st.spinner("Cargando y procesando datos históricos..."):
             y=df_merged['mep_ajustado'],
             mode='lines',
             name='Dólar MEP ajustado',
-            line=dict(color='#00BFFF', width=2), # Azul cian
-             hoverinfo='text',
-             hovertext=[
-                 f"<b>Fecha:</b> {row.fecha.strftime('%d-%m-%Y')}<br>"
-                 f"<b>MEP Ajustado:</b> ${row.mep_ajustado:,.2f}<br>"
-                 f"<b>MEP Nominal:</b> ${row.mep_nominal:,.2f}"
-                 for row in df_merged.itertuples()
-             ]
+            line=dict(color='#00BFFF', width=2.5),
+            hoverinfo='text',
+            hovertext=[
+                f"<b>Fecha:</b> {row.fecha.strftime('%d-%m-%Y')}<br>"
+                f"<b>MEP Ajustado:</b> ${row.mep_ajustado:,.2f}<br>"
+                f"<b>MEP Nominal:</b> ${row.mep_nominal:,.2f}"
+                for row in df_merged.itertuples()
+            ]
         ))
         
-        # 4. Añadir el círculo rojo de la imagen de ejemplo
-        # Definimos el rango a destacar
+        # 4. Añadir el área destacada
         highlight_start_date = datetime(2024, 4, 15)
         df_highlight = df_merged[df_merged['fecha'] >= highlight_start_date]
 
         if not df_highlight.empty:
-            # Encontrar los límites para dibujar una forma de elipse/círculo
-            x0 = df_highlight['fecha'].min()
-            x1 = df_highlight['fecha'].max() + pd.Timedelta(days=10) # Un poco más de espacio
-            y0 = df_highlight['mep_ajustado'].min() * 0.95
-            y1 = df_highlight['mep_ajustado'].max() * 1.05
-
-            fig.add_shape(
-                type="rect", # 'rect' es más robusto para este tipo de highlight
-                xref="x", yref="y",
-                x0=x0, y0=y0, x1=x1, y1=y1,
-                line=dict(color="Crimson", width=2, dash="dot"),
-                fillcolor="rgba(220, 20, 60, 0.1)" # Relleno semi-transparente
-            )
+            fig.add_trace(go.Scatter(
+                x=df_highlight['fecha'],
+                y=df_highlight['mep_ajustado'],
+                fill='tozeroy',
+                mode='none',
+                fillcolor='rgba(220, 20, 60, 0.2)',
+                name='Período Reciente',
+                hoverinfo='none'
+            ))
 
         # 5. Configurar el layout del gráfico
         fig.update_layout(
@@ -143,18 +135,15 @@ with st.spinner("Cargando y procesando datos históricos..."):
             height=600,
             hovermode='x unified',
             legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
-            yaxis=dict(
-                tickprefix="$",
-                tickformat=",.0f"
-            )
+            yaxis=dict(tickprefix="$", tickformat=",.0f")
         )
 
         st.plotly_chart(fig, use_container_width=True)
         
         # Mostrar una nota sobre el último dato de IPC utilizado
         st.info(
-            f"📈 Último dato de IPC utilizado para el ajuste corresponde a **{fecha_ultimo_ipc.strftime('%B de %Y')}** (valor: {ipc_actual}). "
-            f"Los precios posteriores a esa fecha se ajustan con este último valor.",
+            f"📈 Último dato de IPC utilizado para el ajuste corresponde a **{fecha_ultimo_ipc.strftime('%B de %Y')}**. "
+            f"Los precios posteriores se ajustan con este último valor disponible.",
             icon="ℹ️"
         )
         
@@ -171,7 +160,7 @@ with st.spinner("Cargando y procesando datos históricos..."):
             )
 
     else:
-        st.error("No se pudieron cargar todos los datos necesarios para generar el gráfico. Por favor, intente de nuevo más tarde.")
+        st.error("No se pudieron cargar todos los datos necesarios desde el BCRA para generar el gráfico. Por favor, intente de nuevo más tarde.")
 
 st.markdown("---")
-st.caption("Fuente de Datos: Dólar MEP de [dolarapi.com](https://dolarapi.com/) | IPC Nacional GBA desde [api.bcra.gob.ar](https://www.bcra.gob.ar/BCRAyVos/p-API-BCRA.asp).")
+st.caption("Fuente de Datos: Tipo de Cambio Implícito e IPC Nacional GBA desde la API de Estadísticas del [Banco Central de la República Argentina (BCRA)](https://www.bcra.gob.ar/BCRAyVos/p-API-BCRA.asp).")
