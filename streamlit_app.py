@@ -3,7 +3,6 @@ import pandas as pd
 import requests
 import plotly.graph_objects as go
 from datetime import datetime
-import yfinance as yf
 
 # --- CONFIGURACIÓN DE LA PÁGINA ---
 st.set_page_config(
@@ -23,42 +22,49 @@ El área destacada en rojo muestra el comportamiento del precio desde mediados d
 # --- FUNCIONES DE OBTENCIÓN DE DATOS (CON CACHÉ) ---
 
 @st.cache_data(ttl=3600) # Cachea los datos por 1 hora
-def get_mep_from_al30(start_date="2020-09-01"):
+def get_mep_from_data912():
     """
-    Calcula el Dólar MEP implícito usando los bonos AL30 y AL30D
-    de Yahoo Finance. El bono AL30 fue emitido en Septiembre de 2020.
+    Calcula el Dólar MEP implícito usando los datos históricos de los bonos
+    AL30 y AL30D desde la API de data912.com.
     """
     try:
-        # Descargar datos históricos
-        # AL30.BA -> Bono en Pesos
-        # AL30D.BA -> Bono en Dólares
-        st.write("Descargando datos de AL30.BA y AL30D.BA...")
-        al30_ars = yf.download("AL30.BA", start=start_date, progress=False)
-        al30_usd = yf.download("AL30D.BA", start=start_date, progress=False)
-        st.write("Datos descargados.")
+        # 1. Obtener datos del bono AL30 en Pesos
+        url_ars = "https://data912.com/historical/bonds/AL30"
+        response_ars = requests.get(url_ars, timeout=20)
+        response_ars.raise_for_status()
+        data_ars = response_ars.json()
+        df_ars = pd.DataFrame(data_ars)
+        # Seleccionamos fecha y precio de cierre ('c')
+        df_ars = df_ars[['date', 'c']].rename(columns={'date': 'fecha', 'c': 'al30_ars'})
+        df_ars['fecha'] = pd.to_datetime(df_ars['fecha'])
 
-        if al30_ars.empty or al30_usd.empty:
-            st.error("No se pudieron obtener los datos de AL30/AL30D desde Yahoo Finance. Es posible que el mercado esté cerrado o haya un problema con la fuente de datos.")
-            return None
+        # 2. Obtener datos del bono AL30D en Dólares
+        url_usd = "https://data912.com/historical/bonds/AL30D"
+        response_usd = requests.get(url_usd, timeout=20)
+        response_usd.raise_for_status()
+        data_usd = response_usd.json()
+        df_usd = pd.DataFrame(data_usd)
+        df_usd = df_usd[['date', 'c']].rename(columns={'date': 'fecha', 'c': 'al30_usd'})
+        df_usd['fecha'] = pd.to_datetime(df_usd['fecha'])
 
-        # Usar el precio de cierre ajustado
-        df = pd.DataFrame({
-            'al30_ars': al30_ars['Adj Close'],
-            'al30_usd': al30_usd['Adj Close']
-        })
+        # 3. Unir los DataFrames por fecha
+        df = pd.merge(df_ars, df_usd, on='fecha')
         df.dropna(inplace=True)
 
-        # Calcular MEP: Precio en ARS / Precio en USD
+        # 4. Calcular MEP: Precio en ARS / Precio en USD
         df['mep_nominal'] = df['al30_ars'] / df['al30_usd']
         
-        df_mep = df[['mep_nominal']].reset_index()
-        df_mep.columns = ['fecha', 'mep_nominal']
+        # 5. Devolver el DataFrame final con el formato esperado
+        df_mep = df[['fecha', 'mep_nominal']]
         
-        # Filtro simple para valores atípicos que a veces aparecen en los datos de bonos
-        return df_mep[(df_mep['mep_nominal'] > 1) & (df_mep['mep_nominal'] < 5000)]
+        # Filtro simple para valores atípicos
+        return df_mep[df_mep['mep_nominal'] > 0]
 
+    except requests.RequestException as e:
+        st.error(f"Error al conectar con la API de data912.com: {e}")
+        return None
     except Exception as e:
-        st.error(f"Error al calcular MEP desde bonos AL30: {e}")
+        st.error(f"Ocurrió un error al procesar los datos de los bonos: {e}")
         return None
 
 @st.cache_data(ttl=86400) # Cachea el IPC por 24 horas
@@ -89,7 +95,7 @@ def get_ipc_from_datos_gob_ar():
 
 # --- LÓGICA PRINCIPAL DE LA APLICACIÓN ---
 with st.spinner("Cargando y procesando datos... (puede tardar un momento la primera vez)"):
-    df_mep = get_mep_from_al30()
+    df_mep = get_mep_from_data912()
     df_ipc = get_ipc_from_datos_gob_ar()
 
     if df_mep is not None and df_ipc is not None and not df_mep.empty and not df_ipc.empty:
@@ -179,4 +185,4 @@ with st.spinner("Cargando y procesando datos... (puede tardar un momento la prim
         st.error("No se pudieron cargar todos los datos necesarios para generar el gráfico. Por favor, intente de nuevo más tarde.")
 
 st.markdown("---")
-st.caption("Fuente de Datos: MEP implícito calculado con bonos AL30/AL30D desde Yahoo Finance | IPC Nacional desde datos.gob.ar.")
+st.caption("Fuente de Datos: MEP implícito calculado con bonos AL30/AL30D desde data912.com | IPC Nacional desde datos.gob.ar.")
