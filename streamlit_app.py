@@ -261,13 +261,6 @@ with st.spinner("Cargando y procesando datos... (puede tardar un momento la prim
 
             st.plotly_chart(fig, use_container_width=True)
             
-            # Mostrar una nota sobre el último dato de IPC utilizado
-            st.info(
-                f"📈 Último dato de IPC utilizado para el ajuste corresponde a **{fecha_ultimo_ipc.strftime('%B de %Y')}**. "
-                f"Los precios posteriores se ajustan con este último valor disponible.",
-                icon="ℹ️"
-            )
-            
             # Expansor para mostrar los datos en una tabla
             with st.expander("Ver tabla de datos completos"):
                 st.dataframe(
