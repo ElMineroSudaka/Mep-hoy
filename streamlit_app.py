@@ -76,9 +76,10 @@ def get_ccl_from_ggal(start_date="2015-01-01"):
     if df_ars is not None and df_usd is not None:
         df = pd.merge(df_ars, df_usd, on='fecha')
         df.dropna(inplace=True)
-        df['ccl_nominal'] = (df['ggal_ars'] / df['ggal_usd']) * 10
-        df_ccl = df[['fecha', 'ccl_nominal']].rename(columns={'ccl_nominal': 'mep_nominal'})
-        return df_ccl[df_ccl['mep_nominal'] > 0]
+        # CORRECCIÓN: Usar .squeeze() para asegurar que los operandos son Series y evitar el ValueError
+        df['ccl_nominal'] = (df['ggal_ars'].squeeze() / df['ggal_usd'].squeeze()) * 10
+        df_ccl = df[['fecha', 'ccl_nominal']]
+        return df_ccl[df_ccl['ccl_nominal'] > 0]
     else:
         st.error("No se pudieron consolidar los datos de precios en ARS y USD.")
         return None
@@ -129,7 +130,7 @@ with st.spinner("Cargando y procesando datos... (puede tardar un momento la prim
         ipc_actual = df_merged['ipc'].iloc[-1]
         fecha_ultimo_ipc = df_ipc['fecha'].iloc[-1]
         
-        df_merged['ccl_ajustado'] = df_merged['mep_nominal'] * (ipc_actual / df_merged['ipc'])
+        df_merged['ccl_ajustado'] = df_merged['ccl_nominal'] * (ipc_actual / df_merged['ipc'])
 
         # 3. Crear el gráfico con Plotly
         fig = go.Figure()
@@ -145,7 +146,7 @@ with st.spinner("Cargando y procesando datos... (puede tardar un momento la prim
             hovertext=[
                 f"<b>Fecha:</b> {row.fecha.strftime('%d-%m-%Y')}<br>"
                 f"<b>CCL Ajustado:</b> ${row.ccl_ajustado:,.2f}<br>"
-                f"<b>CCL Nominal:</b> ${row.mep_nominal:,.2f}"
+                f"<b>CCL Nominal:</b> ${row.ccl_nominal:,.2f}"
                 for row in df_merged.itertuples()
             ]
         ))
@@ -189,7 +190,7 @@ with st.spinner("Cargando y procesando datos... (puede tardar un momento la prim
         # Expansor para mostrar los datos en una tabla
         with st.expander("Ver tabla de datos completos"):
             st.dataframe(
-                df_merged[['fecha', 'mep_nominal', 'ipc', 'ccl_ajustado']].rename(columns={'mep_nominal': 'ccl_nominal'}).style.format({
+                df_merged[['fecha', 'ccl_nominal', 'ipc', 'ccl_ajustado']].style.format({
                     'ccl_nominal': '${:,.2f}',
                     'ipc': '{:.2f}',
                     'ccl_ajustado': '${:,.2f}',
@@ -203,4 +204,3 @@ with st.spinner("Cargando y procesando datos... (puede tardar un momento la prim
 
 st.markdown("---")
 st.caption("Fuente de Datos: CCL implícito calculado con GGAL/GGAL.BA (con respaldo de data912.com) | IPC Nacional desde datos.gob.ar.")
-
