@@ -3,6 +3,7 @@ import pandas as pd
 import requests
 import plotly.graph_objects as go
 from datetime import datetime
+import yfinance as yf
 
 # --- CONFIGURACIÓN DE LA PÁGINA ---
 st.set_page_config(
@@ -14,73 +15,88 @@ st.set_page_config(
 # --- TÍTULO Y DESCRIPCIÓN ---
 st.title("📈 Dólar MEP Histórico a Precios de Hoy")
 st.markdown("""
-Esta aplicación visualiza la serie histórica del **Dólar MEP (implícito)** ajustada por la inflación de Argentina (IPC Nacional)
-para reflejar su valor en pesos de hoy. Esto permite comparar el poder de compra real del dólar a lo largo del tiempo.
+Esta aplicación visualiza la serie histórica del **Dólar MEP (implícito)**, ajustada por la inflación de Argentina (IPC Nacional),
+para reflejar su valor en pesos de hoy. El cálculo se basa en la cotización de los bonos soberanos **AL30** y **AL30D**.
 El área destacada en rojo muestra el comportamiento del precio desde mediados de abril de 2024.
 """)
 
 # --- FUNCIONES DE OBTENCIÓN DE DATOS (CON CACHÉ) ---
 
-# Token público y headers para la API del BCRA
-BCRA_API_TOKEN = "BEARER eyJhbGciOiJIUzUxMiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3NTI1MjQ5MDksInR5cGUiOiJleHRlcm5hbCIsInVzZXIiOiJqdWFuLmFtYWRvQGZpbml0ZWNoLmNvbS5hciJ9.7M0mS_kkONYrEp6Wpve0Y1c2-y1p2i-T9o_N2i_j2kzlq2iOa-Yd9iALV5IqLd_IpoCM_2Wv_z3e2hh-3Q7PXA"
-BCRA_HEADERS = {"Authorization": BCRA_API_TOKEN}
-
 @st.cache_data(ttl=3600) # Cachea los datos por 1 hora
-def get_bcra_series(variable_id, column_name):
+def get_mep_from_al30(start_date="2020-09-01"):
     """
-    Función genérica para obtener una serie de tiempo de la API del BCRA.
-    
-    Args:
-        variable_id (int): El ID de la variable a consultar.
-        column_name (str): El nombre a asignar a la columna de valor.
-
-    Returns:
-        pd.DataFrame: Un DataFrame con 'fecha' y la columna de valor especificada.
+    Calcula el Dólar MEP implícito usando los bonos AL30 y AL30D
+    de Yahoo Finance. El bono AL30 fue emitido en Septiembre de 2020.
     """
-    url = "https://api.bcra.gob.ar/estadisticas/v1/principalesvariables"
     try:
-        response = requests.get(url, headers=BCRA_HEADERS, timeout=20)
-        response.raise_for_status()
-        all_data = response.json()['results']
-        
-        series_data = next((item for item in all_data if item["idVariable"] == variable_id), None)
-        
-        if series_data and series_data.get('principalesVariables'):
-            df = pd.DataFrame(series_data['principalesVariables'])
-            df = df[['fecha', 'valor']]
-            df.columns = ['fecha', column_name]
-            df['fecha'] = pd.to_datetime(df['fecha'], format='%Y-%m-%d')
-            df[column_name] = pd.to_numeric(df[column_name].astype(str).str.replace(',', '.'))
-            df = df[df[column_name] > 0].dropna() # Filtrar valores nulos o incorrectos
-            return df.sort_values('fecha')
-        else:
-            st.error(f"No se encontraron datos para la variable con ID {variable_id} en la respuesta del BCRA.")
+        # Descargar datos históricos
+        # AL30.BA -> Bono en Pesos
+        # AL30D.BA -> Bono en Dólares
+        st.write("Descargando datos de AL30.BA y AL30D.BA...")
+        al30_ars = yf.download("AL30.BA", start=start_date, progress=False)
+        al30_usd = yf.download("AL30D.BA", start=start_date, progress=False)
+        st.write("Datos descargados.")
+
+        if al30_ars.empty or al30_usd.empty:
+            st.error("No se pudieron obtener los datos de AL30/AL30D desde Yahoo Finance. Es posible que el mercado esté cerrado o haya un problema con la fuente de datos.")
             return None
-            
+
+        # Usar el precio de cierre ajustado
+        df = pd.DataFrame({
+            'al30_ars': al30_ars['Adj Close'],
+            'al30_usd': al30_usd['Adj Close']
+        })
+        df.dropna(inplace=True)
+
+        # Calcular MEP: Precio en ARS / Precio en USD
+        df['mep_nominal'] = df['al30_ars'] / df['al30_usd']
+        
+        df_mep = df[['mep_nominal']].reset_index()
+        df_mep.columns = ['fecha', 'mep_nominal']
+        
+        # Filtro simple para valores atípicos que a veces aparecen en los datos de bonos
+        return df_mep[(df_mep['mep_nominal'] > 1) & (df_mep['mep_nominal'] < 5000)]
+
+    except Exception as e:
+        st.error(f"Error al calcular MEP desde bonos AL30: {e}")
+        return None
+
+@st.cache_data(ttl=86400) # Cachea el IPC por 24 horas
+def get_ipc_from_datos_gob_ar():
+    """
+    Obtiene el IPC Nacional (base Dic 2016) desde la API de datos.gob.ar.
+    ID de la serie: 148.3_INIVELNAL_DICI_M_26
+    """
+    url = "https://apis.datos.gob.ar/series/api/series/?ids=148.3_INIVELNAL_DICI_M_26"
+    try:
+        response = requests.get(url, timeout=20)
+        response.raise_for_status()
+        data = response.json()['data']
+        
+        df = pd.DataFrame(data, columns=['fecha', 'ipc'])
+        df['fecha'] = pd.to_datetime(df['fecha'])
+        df['ipc'] = pd.to_numeric(df['ipc'])
+        
+        df['fecha'] = df['fecha'].dt.to_period('M').dt.to_timestamp()
+        return df.sort_values('fecha')
+
     except requests.RequestException as e:
-        st.error(f"Error al conectar con la API del BCRA: {e}")
+        st.error(f"Error al conectar con la API de datos.gob.ar: {e}")
         return None
     except (KeyError, IndexError):
-        st.error("La estructura de datos del BCRA parece haber cambiado. No se pudo procesar la solicitud.")
+        st.error("La estructura de datos de la API de IPC ha cambiado.")
         return None
 
 # --- LÓGICA PRINCIPAL DE LA APLICACIÓN ---
-with st.spinner("Cargando y procesando datos históricos desde el BCRA..."):
-    # ID 296: Tipo de cambio implícito en bonos soberanos (diaria) -> Proxy MEP
-    # ID 26: IPC Nacional GBA, Nivel General, base Dic 2016
-    df_mep = get_bcra_series(variable_id=296, column_name='mep_nominal')
-    df_ipc = get_bcra_series(variable_id=26, column_name='ipc')
-    
-    # El IPC se publica mensualmente, lo preparamos para el cruce
-    if df_ipc is not None:
-        df_ipc['fecha'] = df_ipc['fecha'].dt.to_period('M').dt.to_timestamp()
-
+with st.spinner("Cargando y procesando datos... (puede tardar un momento la primera vez)"):
+    df_mep = get_mep_from_al30()
+    df_ipc = get_ipc_from_datos_gob_ar()
 
     if df_mep is not None and df_ipc is not None and not df_mep.empty and not df_ipc.empty:
         # 1. Unir los dos DataFrames.
         df_merged = pd.merge_asof(
-            df_mep,
-            df_ipc,
+            df_mep.sort_values('fecha'),
+            df_ipc.sort_values('fecha'),
             on='fecha',
             direction='backward'
         )
@@ -160,7 +176,7 @@ with st.spinner("Cargando y procesando datos históricos desde el BCRA..."):
             )
 
     else:
-        st.error("No se pudieron cargar todos los datos necesarios desde el BCRA para generar el gráfico. Por favor, intente de nuevo más tarde.")
+        st.error("No se pudieron cargar todos los datos necesarios para generar el gráfico. Por favor, intente de nuevo más tarde.")
 
 st.markdown("---")
-st.caption("Fuente de Datos: Tipo de Cambio Implícito e IPC Nacional GBA desde la API de Estadísticas del [Banco Central de la República Argentina (BCRA)](https://www.bcra.gob.ar/BCRAyVos/p-API-BCRA.asp).")
+st.caption("Fuente de Datos: MEP implícito calculado con bonos AL30/AL30D desde Yahoo Finance | IPC Nacional desde datos.gob.ar.")
