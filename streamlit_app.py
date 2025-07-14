@@ -4,6 +4,7 @@ import requests
 import plotly.graph_objects as go
 from datetime import datetime
 import yfinance as yf
+import time # Importar la librería time
 
 # --- CONFIGURACIÓN DE LA PÁGINA ---
 st.set_page_config(
@@ -31,6 +32,10 @@ def get_ccl_from_ggal(start_date="2015-01-01"):
     try:
         # Descargar datos históricos
         ggal_ba = yf.download("GGAL.BA", start=start_date, progress=False)
+        
+        # Añadimos una pausa de 1 segundo para evitar el error "Too Many Requests"
+        time.sleep(1) 
+        
         ggal_adr = yf.download("GGAL", start=start_date, progress=False)
 
         if ggal_ba.empty or ggal_adr.empty:
