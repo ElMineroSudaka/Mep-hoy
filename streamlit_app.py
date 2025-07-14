@@ -9,7 +9,7 @@ import time # Importar la librería time
 # --- CONFIGURACIÓN DE LA PÁGINA ---
 st.set_page_config(
     page_title="Dólar Financiero a Precios de Hoy",
-    page_icon="🇦🇷",
+    page_icon="🇦�",
     layout="wide"
 )
 
@@ -40,8 +40,8 @@ def get_ccl_from_ggal(start_date="2015-01-01"):
         ggal_adr = yf.download("GGAL", start=start_date, progress=False, auto_adjust=True)
         if ggal_adr.empty:
             raise ValueError("No se pudieron obtener los datos del ADR (GGAL) desde Yahoo Finance.")
-        # CORRECCIÓN: Crear DataFrame explícitamente para evitar MultiIndex
-        df_usd = pd.DataFrame({'fecha': ggal_adr.index, 'ggal_usd': ggal_adr['Close']})
+        # CORRECCIÓN: Asegurar que los datos son 1D antes de crear el DataFrame
+        df_usd = pd.DataFrame({'fecha': ggal_adr.index, 'ggal_usd': ggal_adr['Close'].values})
         st.success("Precio en Dólares obtenido exitosamente.")
     except Exception as e_adr:
         st.error(f"Error crítico: No se pudo obtener el precio en Dólares desde Yahoo Finance. {e_adr}")
@@ -53,8 +53,8 @@ def get_ccl_from_ggal(start_date="2015-01-01"):
         ggal_ba = yf.download("GGAL.BA", start=start_date, progress=False, auto_adjust=True)
         if ggal_ba.empty:
             raise ValueError("yf.download() para GGAL.BA devolvió un DataFrame vacío.")
-        # CORRECCIÓN: Crear DataFrame explícitamente para evitar MultiIndex
-        df_ars = pd.DataFrame({'fecha': ggal_ba.index, 'ggal_ars': ggal_ba['Close']})
+        # CORRECCIÓN: Asegurar que los datos son 1D antes de crear el DataFrame
+        df_ars = pd.DataFrame({'fecha': ggal_ba.index, 'ggal_ars': ggal_ba['Close'].values})
         st.success("Precio en Pesos obtenido desde Yahoo Finance.")
     except Exception as e_yf_ba:
         st.warning(f"Falló la obtención de GGAL.BA desde Yahoo Finance: {e_yf_ba}. Usando respaldo...")
@@ -203,4 +203,3 @@ with st.spinner("Cargando y procesando datos... (puede tardar un momento la prim
 
 st.markdown("---")
 st.caption("Fuente de Datos: CCL implícito calculado con GGAL/GGAL.BA (con respaldo de data912.com) | IPC Nacional desde datos.gob.ar.")
-
