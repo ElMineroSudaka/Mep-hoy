@@ -30,22 +30,22 @@ def get_ccl_from_ggal(start_date="2015-01-01"):
     de Yahoo Finance. La relación es 1 ADR (GGAL) = 10 acciones locales (GGAL.BA).
     """
     try:
-        # Descargar datos históricos
-        ggal_ba = yf.download("GGAL.BA", start=start_date, progress=False)
+        # Descargar datos históricos, especificando auto_adjust para evitar warnings
+        ggal_ba = yf.download("GGAL.BA", start=start_date, progress=False, auto_adjust=True)
         
         # Añadimos una pausa de 1 segundo para evitar el error "Too Many Requests"
         time.sleep(1) 
         
-        ggal_adr = yf.download("GGAL", start=start_date, progress=False)
+        ggal_adr = yf.download("GGAL", start=start_date, progress=False, auto_adjust=True)
 
         if ggal_ba.empty or ggal_adr.empty:
             st.error("No se pudieron obtener los datos de GGAL desde Yahoo Finance.")
             return None
 
-        # Usar el precio de cierre ajustado
+        # Usar el precio de cierre ('Close' ya que auto_adjust=True se encarga de los ajustes)
         df = pd.DataFrame({
-            'ggal_ars': ggal_ba['Adj Close'],
-            'ggal_usd': ggal_adr['Adj Close']
+            'ggal_ars': ggal_ba['Close'],
+            'ggal_usd': ggal_adr['Close']
         })
         df.dropna(inplace=True)
 
