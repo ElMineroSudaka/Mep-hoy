@@ -40,8 +40,8 @@ def get_ccl_from_ggal(start_date="2015-01-01"):
         ggal_adr = yf.download("GGAL", start=start_date, progress=False, auto_adjust=True)
         if ggal_adr.empty:
             raise ValueError("No se pudieron obtener los datos del ADR (GGAL) desde Yahoo Finance.")
-        df_usd = ggal_adr[['Close']].reset_index().rename(columns={'Date': 'fecha', 'Close': 'ggal_usd'})
-        df_usd['fecha'] = pd.to_datetime(df_usd['fecha'])
+        # CORRECCIÓN: Crear DataFrame explícitamente para evitar MultiIndex
+        df_usd = pd.DataFrame({'fecha': ggal_adr.index, 'ggal_usd': ggal_adr['Close']})
         st.success("Precio en Dólares obtenido exitosamente.")
     except Exception as e_adr:
         st.error(f"Error crítico: No se pudo obtener el precio en Dólares desde Yahoo Finance. {e_adr}")
@@ -53,8 +53,8 @@ def get_ccl_from_ggal(start_date="2015-01-01"):
         ggal_ba = yf.download("GGAL.BA", start=start_date, progress=False, auto_adjust=True)
         if ggal_ba.empty:
             raise ValueError("yf.download() para GGAL.BA devolvió un DataFrame vacío.")
-        df_ars = ggal_ba[['Close']].reset_index().rename(columns={'Date': 'fecha', 'Close': 'ggal_ars'})
-        df_ars['fecha'] = pd.to_datetime(df_ars['fecha'])
+        # CORRECCIÓN: Crear DataFrame explícitamente para evitar MultiIndex
+        df_ars = pd.DataFrame({'fecha': ggal_ba.index, 'ggal_ars': ggal_ba['Close']})
         st.success("Precio en Pesos obtenido desde Yahoo Finance.")
     except Exception as e_yf_ba:
         st.warning(f"Falló la obtención de GGAL.BA desde Yahoo Finance: {e_yf_ba}. Usando respaldo...")
@@ -76,7 +76,6 @@ def get_ccl_from_ggal(start_date="2015-01-01"):
     if df_ars is not None and df_usd is not None:
         df = pd.merge(df_ars, df_usd, on='fecha')
         df.dropna(inplace=True)
-        # CORRECCIÓN: Usar .squeeze() para asegurar que los operandos son Series y evitar el ValueError
         df['ccl_nominal'] = (df['ggal_ars'].squeeze() / df['ggal_usd'].squeeze()) * 10
         df_ccl = df[['fecha', 'ccl_nominal']]
         return df_ccl[df_ccl['ccl_nominal'] > 0]
@@ -204,3 +203,4 @@ with st.spinner("Cargando y procesando datos... (puede tardar un momento la prim
 
 st.markdown("---")
 st.caption("Fuente de Datos: CCL implícito calculado con GGAL/GGAL.BA (con respaldo de data912.com) | IPC Nacional desde datos.gob.ar.")
+
