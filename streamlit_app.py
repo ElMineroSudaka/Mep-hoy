@@ -17,7 +17,6 @@ st.title("📈 Dólar Financiero (CCL) Histórico a Precios de Hoy")
 st.markdown("""
 Esta aplicación visualiza la serie histórica del **Dólar Contado con Liquidación (implícito)**, ajustada por la inflación de Argentina (IPC Nacional),
 para reflejar su valor en pesos de hoy. El cálculo se basa en la cotización de las acciones de **Grupo Financiero Galicia (GGAL)**.
-El área destacada en rojo muestra el comportamiento del precio desde mediados de abril de 2024.
 """)
 
 # --- FUNCIONES DE OBTENCIÓN DE DATOS (CON CACHÉ) ---
@@ -232,22 +231,7 @@ with st.spinner("Cargando y procesando datos... (puede tardar un momento la prim
                 annotation_position="top right"
             )
             
-            # 4. Añadir el área destacada
-            highlight_start_date = datetime(2024, 4, 15)
-            df_highlight = df_merged[df_merged['fecha'] >= highlight_start_date]
-
-            if not df_highlight.empty:
-                fig.add_trace(go.Scatter(
-                    x=df_highlight['fecha'],
-                    y=df_highlight['ccl_ajustado'],
-                    fill='tozeroy',
-                    mode='none',
-                    fillcolor='rgba(220, 20, 60, 0.2)',
-                    name='Período Reciente',
-                    hoverinfo='none'
-                ))
-
-            # 5. Configurar el layout del gráfico
+            # 4. Configurar el layout del gráfico
             fig.update_layout(
                 template='plotly_dark',
                 title='<b>Dólar CCL a Precios de Hoy (Ajustado por IPC)</b>',
