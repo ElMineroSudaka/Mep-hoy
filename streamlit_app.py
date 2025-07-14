@@ -26,40 +26,63 @@ El área destacada en rojo muestra el comportamiento del precio desde mediados d
 @st.cache_data(ttl=3600) # Cachea los datos por 1 hora
 def get_ccl_from_ggal(start_date="2015-01-01"):
     """
-    Calcula el Dólar CCL implícito usando los tickers de Grupo Galicia (GGAL)
-    de Yahoo Finance. La relación es 1 ADR (GGAL) = 10 acciones locales (GGAL.BA).
+    Calcula el Dólar CCL implícito siguiendo una lógica específica:
+    1. Obtiene el precio en USD (ADR) desde Yahoo Finance (crítico).
+    2. Intenta obtener el precio en ARS desde Yahoo Finance.
+    3. Si el paso 2 falla, usa data912.com como respaldo para el precio en ARS.
     """
-    try:
-        # Descargar datos históricos, especificando auto_adjust para evitar warnings
-        ggal_ba = yf.download("GGAL.BA", start=start_date, progress=False, auto_adjust=True)
-        
-        # Añadimos una pausa de 1 segundo para evitar el error "Too Many Requests"
-        time.sleep(1) 
-        
-        ggal_adr = yf.download("GGAL", start=start_date, progress=False, auto_adjust=True)
+    df_ars = None
+    df_usd = None
 
-        if ggal_ba.empty or ggal_adr.empty:
-            st.error("No se pudieron obtener los datos de GGAL desde Yahoo Finance.")
+    # Paso 1: Obtener GGAL ADR en USD (fuente única y crítica)
+    try:
+        st.info("Obteniendo precio en Dólares (GGAL ADR) desde Yahoo Finance...")
+        ggal_adr = yf.download("GGAL", start=start_date, progress=False, auto_adjust=True)
+        if ggal_adr.empty:
+            raise ValueError("No se pudieron obtener los datos del ADR (GGAL) desde Yahoo Finance.")
+        df_usd = ggal_adr[['Close']].reset_index().rename(columns={'Date': 'fecha', 'Close': 'ggal_usd'})
+        df_usd['fecha'] = pd.to_datetime(df_usd['fecha'])
+        st.success("Precio en Dólares obtenido exitosamente.")
+    except Exception as e_adr:
+        st.error(f"Error crítico: No se pudo obtener el precio en Dólares desde Yahoo Finance. {e_adr}")
+        return None
+
+    # Paso 2: Intentar obtener GGAL en ARS desde Yahoo Finance
+    try:
+        st.info("Intentando obtener precio en Pesos (GGAL.BA) desde Yahoo Finance...")
+        ggal_ba = yf.download("GGAL.BA", start=start_date, progress=False, auto_adjust=True)
+        if ggal_ba.empty:
+            raise ValueError("yf.download() para GGAL.BA devolvió un DataFrame vacío.")
+        df_ars = ggal_ba[['Close']].reset_index().rename(columns={'Date': 'fecha', 'Close': 'ggal_ars'})
+        df_ars['fecha'] = pd.to_datetime(df_ars['fecha'])
+        st.success("Precio en Pesos obtenido desde Yahoo Finance.")
+    except Exception as e_yf_ba:
+        st.warning(f"Falló la obtención de GGAL.BA desde Yahoo Finance: {e_yf_ba}. Usando respaldo...")
+        # Paso 3: Fallback para el precio en ARS desde data912.com
+        try:
+            url_ars = "https://data912.com/historical/stocks/ggal"
+            response_ars = requests.get(url_ars, timeout=20)
+            response_ars.raise_for_status()
+            data_ars = response_ars.json()
+            df_ars_fallback = pd.DataFrame(data_ars)
+            df_ars = df_ars_fallback[['date', 'c']].rename(columns={'date': 'fecha', 'c': 'ggal_ars'})
+            df_ars['fecha'] = pd.to_datetime(df_ars['fecha'])
+            st.success("Precio en Pesos obtenido desde la fuente de respaldo (data912.com).")
+        except Exception as e_fallback:
+            st.error(f"Falló también la fuente de respaldo para el precio en Pesos: {e_fallback}")
             return None
 
-        # Usar el precio de cierre ('Close' ya que auto_adjust=True se encarga de los ajustes)
-        df = pd.DataFrame({
-            'ggal_ars': ggal_ba['Close'],
-            'ggal_usd': ggal_adr['Close']
-        })
+    # Paso 4: Unir los DataFrames y calcular
+    if df_ars is not None and df_usd is not None:
+        df = pd.merge(df_ars, df_usd, on='fecha')
         df.dropna(inplace=True)
-
-        # Calcular CCL: (Precio en ARS / Precio en USD) * Ratio de conversión
         df['ccl_nominal'] = (df['ggal_ars'] / df['ggal_usd']) * 10
-        
-        df_ccl = df[['ccl_nominal']].reset_index()
-        df_ccl.columns = ['fecha', 'mep_nominal'] # Usamos 'mep_nominal' para mantener consistencia interna
-        
+        df_ccl = df[['fecha', 'ccl_nominal']].rename(columns={'ccl_nominal': 'mep_nominal'})
         return df_ccl[df_ccl['mep_nominal'] > 0]
-
-    except Exception as e:
-        st.error(f"Error al calcular CCL desde Yahoo Finance: {e}")
+    else:
+        st.error("No se pudieron consolidar los datos de precios en ARS y USD.")
         return None
+
 
 @st.cache_data(ttl=86400) # Cachea el IPC por 24 horas
 def get_ipc_from_datos_gob_ar():
@@ -179,4 +202,5 @@ with st.spinner("Cargando y procesando datos... (puede tardar un momento la prim
         st.error("No se pudieron cargar todos los datos necesarios para generar el gráfico. Por favor, intente de nuevo más tarde.")
 
 st.markdown("---")
-st.caption("Fuente de Datos: CCL implícito calculado con GGAL/GGAL.BA desde Yahoo Finance | IPC Nacional desde datos.gob.ar.")
+st.caption("Fuente de Datos: CCL implícito calculado con GGAL/GGAL.BA (con respaldo de data912.com) | IPC Nacional desde datos.gob.ar.")
+
