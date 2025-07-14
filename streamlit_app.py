@@ -108,6 +108,7 @@ def get_ccl_from_ggal(start_date="2015-01-01"):
 def get_ipc_from_datos_gob_ar():
     """
     Obtiene el IPC Nacional (base Dic 2016) desde la API de datos.gob.ar.
+    Si no hay datos recientes, los complementa con datos manuales actualizados.
     ID de la serie: 148.3_INIVELNAL_DICI_M_26
     """
     url = "https://apis.datos.gob.ar/series/api/series/?ids=148.3_INIVELNAL_DICI_M_26"
@@ -131,7 +132,41 @@ def get_ipc_from_datos_gob_ar():
             raise ValueError("No se obtuvieron datos válidos de IPC")
         
         df['fecha'] = df['fecha'].dt.to_period('M').dt.to_timestamp()
-        return df.sort_values('fecha')
+        df = df.sort_values('fecha')
+        
+        # MEJORA: Agregar datos faltantes de 2025 si la API no los tiene
+        ultimo_dato = df['fecha'].max()
+        fecha_abril_2025 = pd.Timestamp('2025-04-01')
+        
+        if ultimo_dato < fecha_abril_2025:
+            # Obtener el último IPC para calcular los nuevos valores
+            ultimo_ipc = df['ipc'].iloc[-1]
+            
+            # Datos manuales de inflación mensual 2025 (fuente: INDEC)
+            # Se actualizan con cada nuevo dato oficial
+            datos_2025 = [
+                ('2025-01-01', 2.2),  # Enero 2025: 2.2%
+                ('2025-02-01', 2.4),  # Febrero 2025: 2.4%
+                ('2025-03-01', 3.7),  # Marzo 2025: 3.7%
+                ('2025-04-01', 2.8),  # Abril 2025: 2.8%
+                ('2025-05-01', 1.5),  # Mayo 2025: 1.5%
+            ]
+            
+            # Calcular IPC acumulado para cada mes
+            ipc_actual = ultimo_ipc
+            for fecha_str, inflacion_mensual in datos_2025:
+                fecha = pd.Timestamp(fecha_str)
+                if fecha > ultimo_dato:
+                    ipc_actual = ipc_actual * (1 + inflacion_mensual/100)
+                    nuevo_dato = pd.DataFrame({
+                        'fecha': [fecha],
+                        'ipc': [ipc_actual]
+                    })
+                    df = pd.concat([df, nuevo_dato], ignore_index=True)
+            
+            st.info("✅ Datos de IPC complementados con información oficial del INDEC hasta mayo 2025")
+        
+        return df
 
     except requests.RequestException as e:
         st.error(f"Error al conectar con la API de datos.gob.ar: {e}")
@@ -186,6 +221,16 @@ with st.spinner("Cargando y procesando datos... (puede tardar un momento la prim
                 ]
             ))
             
+            # Línea punteada del valor mínimo
+            valor_minimo = df_merged['ccl_ajustado'].min()
+            fig.add_hline(
+                y=valor_minimo,
+                line_dash="dash",
+                line_color="red",
+                annotation_text=f"Mínimo: ${valor_minimo:,.2f}",
+                annotation_position="top right"
+            )
+            
             # 4. Añadir el área destacada
             highlight_start_date = datetime(2024, 4, 15)
             df_highlight = df_merged[df_merged['fecha'] >= highlight_start_date]
@@ -207,7 +252,7 @@ with st.spinner("Cargando y procesando datos... (puede tardar un momento la prim
                 title='<b>Dólar CCL a Precios de Hoy (Ajustado por IPC)</b>',
                 yaxis_title='Valor en Pesos Argentinos (de hoy)',
                 xaxis_title='Fecha',
-                height=600,
+                height=800,  # Aumentado de 600 a 800
                 hovermode='x unified',
                 legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
                 yaxis=dict(tickprefix="$", tickformat=",.0f")
