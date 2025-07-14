@@ -35,7 +35,6 @@ def get_ccl_from_ggal(start_date="2015-01-01"):
 
     # Paso 1: Obtener GGAL ADR en USD (fuente única y crítica)
     try:
-        st.info("Obteniendo precio en Dólares (GGAL ADR) desde Yahoo Finance...")
         ggal_adr = yf.download("GGAL", start=start_date, progress=False, auto_adjust=True)
         if ggal_adr.empty:
             raise ValueError("No se pudieron obtener los datos del ADR (GGAL) desde Yahoo Finance.")
@@ -44,15 +43,12 @@ def get_ccl_from_ggal(start_date="2015-01-01"):
         df_usd = ggal_adr[['Close']].copy()
         df_usd.reset_index(inplace=True)
         df_usd.columns = ['fecha', 'ggal_usd']
-        
-        st.success("Precio en Dólares obtenido exitosamente.")
     except Exception as e_adr:
         st.error(f"Error crítico: No se pudo obtener el precio en Dólares desde Yahoo Finance. {e_adr}")
         return None
 
     # Paso 2: Intentar obtener GGAL en ARS desde Yahoo Finance
     try:
-        st.info("Intentando obtener precio en Pesos (GGAL.BA) desde Yahoo Finance...")
         ggal_ba = yf.download("GGAL.BA", start=start_date, progress=False, auto_adjust=True)
         if ggal_ba.empty:
             raise ValueError("yf.download() para GGAL.BA devolvió un DataFrame vacío.")
@@ -61,8 +57,6 @@ def get_ccl_from_ggal(start_date="2015-01-01"):
         df_ars = ggal_ba[['Close']].copy()
         df_ars.reset_index(inplace=True)
         df_ars.columns = ['fecha', 'ggal_ars']
-        
-        st.success("Precio en Pesos obtenido desde Yahoo Finance.")
     except Exception as e_yf_ba:
         st.warning(f"Falló la obtención de GGAL.BA desde Yahoo Finance: {e_yf_ba}. Usando respaldo...")
         # Paso 3: Fallback para el precio en ARS desde data912.com
@@ -74,7 +68,6 @@ def get_ccl_from_ggal(start_date="2015-01-01"):
             df_ars_fallback = pd.DataFrame(data_ars)
             df_ars = df_ars_fallback[['date', 'c']].rename(columns={'date': 'fecha', 'c': 'ggal_ars'})
             df_ars['fecha'] = pd.to_datetime(df_ars['fecha'])
-            st.success("Precio en Pesos obtenido desde la fuente de respaldo (data912.com).")
         except Exception as e_fallback:
             st.error(f"Falló también la fuente de respaldo para el precio en Pesos: {e_fallback}")
             return None
@@ -119,7 +112,6 @@ def get_ipc_from_datos_gob_ar():
     """
     url = "https://apis.datos.gob.ar/series/api/series/?ids=148.3_INIVELNAL_DICI_M_26"
     try:
-        st.info("Obteniendo datos de IPC desde datos.gob.ar...")
         response = requests.get(url, timeout=20)
         response.raise_for_status()
         data = response.json()
@@ -139,7 +131,6 @@ def get_ipc_from_datos_gob_ar():
             raise ValueError("No se obtuvieron datos válidos de IPC")
         
         df['fecha'] = df['fecha'].dt.to_period('M').dt.to_timestamp()
-        st.success("Datos de IPC obtenidos exitosamente.")
         return df.sort_values('fecha')
 
     except requests.RequestException as e:
